@@ -40,8 +40,6 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver):
         node = Node('DNASubject', name=subject.name, gen=0, sex=subject.sex)
         neo4j_driver.create(node)
 
-    
-
     return founders
 
 def build_trees(
@@ -73,7 +71,7 @@ def build_trees(
 
         num_progenitors_gen = len(range(population[gen-1]))
 
-        for i in range(num_samples_per_gen):
+        for i in tqdm(range(num_samples_per_gen)):
             # Select parents.
 
             progenitor1_idx = random.choice(num_progenitors_gen)
@@ -99,7 +97,7 @@ def build_trees(
             progenitor2 =  population[gen-1][progenitor2_idx]
     
             # non-recursive simulation
-            new_subject = create_subject(progenitor1, progenitor2, gen, breakpoint_probability)
+            new_subject = create_subject(progenitor1, progenitor2, gen, neo4j_driver, breakpoint_probability)
             current_gen_subjects.append(new_subject)
 
         population[gen] = current_gen_subjects

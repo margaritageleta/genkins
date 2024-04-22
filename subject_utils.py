@@ -96,7 +96,7 @@ class DNASubject():
     def __repr__(self):
         return self.name
 
-def create_new_subject(subject1, subject2, neo4j_driver, breakpoint_probability=None):
+def create_new_subject(subject1, subject2, gen, neo4j_driver, breakpoint_probability=None):
 
     maternal = subject1.admix(breakpoint_probability)
     paternal = subject2.admix(breakpoint_probability)
@@ -111,7 +111,12 @@ def create_new_subject(subject1, subject2, neo4j_driver, breakpoint_probability=
     chm_length_morgans = subject1.chm_length_morgans
     chm_length_snps = subject1.chm_length_snps
 
-    return DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal, birthloc)
+    new_subject = DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal, birthloc)
+    
+    node = Node('DNASubject', name=new_subject.name, gen=gen, sex=new_subject.sex)
+    neo4j_driver.create(node)
+
+    return new_subject
 
 def distance(p1, p2):
     R = 6371.0 # Radius of the Earth in km
