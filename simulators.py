@@ -3,21 +3,27 @@ import numpy as np
 from py2neo import Graph, Node, Relationship, NodeMatcher
 from neo4j import GraphDatabase
  
-from subject_utils import DNASubject, create_new_subject, mating_probability
+from subject_utils import DNASubject, create_new_subject, mating_probability, softmax
 
-def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver):
+def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir):
     
     # Information about snps, chm, lengths from reference, genetic map.
+    """
     chm = genetic_map["chm"]
     chm_length_morgans = genetic_map["chm_length_morgans"]
     chm_length_snps = genetic_map["chm_length_snps"]
+    """
+    
+    chm = 22
+    chm_length_morgans = 250.0
+    chm_length_snps = 300000
 
     # building founders
     founders = []
-
-    for i in tqdm(range(sample_map.shape[0])):
-
-        index = sample_map.loc[i, "index_in_reference"]
+    index = sample_map.index
+    index = index[:11] #####!!!!
+    for i in tqdm(index):
+        
         name = sample_map.loc[i, "sample"]
 
         # when creating maternal, paternal make sure it has same keys
@@ -26,18 +32,27 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver):
         paternal = {}
 
         # let us use the first for maternal in the vcf file...
-        maternal["snps"] = vcf_data["calldata/GT"][:,index,0]
-        paternal["snps"] = vcf_data["calldata/GT"][:,index,1]
+        """
+        maternal["snps"] = vcf_data["calldata/GT"][:,i,0]
+        paternal["snps"] = vcf_data["calldata/GT"][:,i,1]
 
         # single ancestry assumption.
         maternal["anc"] = np.array([sample_map.loc[i,"population_code"]]*chm_length_snps)
         paternal["anc"] = np.array([sample_map.loc[i,"population_code"]]*chm_length_snps)
-
+        """
+        
         # any more info like coordinates, prs can be added here.
-        subject = DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal)
+        subject = DNASubject(
+            chm=chm, 
+            chm_length_morgans=chm_length_morgans, 
+            chm_length_snps=chm_length_snps, 
+            maternal=maternal, 
+            paternal=paternal, 
+            birthloc=(sample_map.loc[i, 'latitude'], sample_map.loc[i, 'longitude'])
+        )
         founders.append(subject)
         
-        node = Node('DNASubject', name=subject.name, gen=0, sex=subject.sex)
+        node = Node('DNASubject_Gen0', name=subject.name, gen=0, sex=subject.sex, progenitor1=None, progenitor2=None)
         neo4j_driver.create(node)
 
     return founders
@@ -69,35 +84,41 @@ def build_trees(
         print("Simulating generation ", gen)
         current_gen_subjects = []
 
-        num_progenitors_gen = len(range(population[gen-1]))
+        num_progenitors_gen = len(range(len(population[gen-1])))
+        
+        print(range(num_samples_per_gen))
 
         for i in tqdm(range(num_samples_per_gen)):
             # Select parents.
 
-            progenitor1_idx = random.choice(num_progenitors_gen)
+            progenitor1_idx = np.random.choice(num_progenitors_gen)
             progenitor1 = population[gen-1][progenitor1_idx]
 
             probs_mating = np.zeros(num_progenitors_gen)
 
             for progenitor2_idx in range(num_progenitors_gen):
-                if prorgenitor1_idx != progenitor2_idx: 
+                if progenitor1_idx != progenitor2_idx: 
 
                     # Compute mating probability between progenitor1 and progenitor2.
                     # As of now, it is based on distance. 
                     progenitor2 = population[gen-1][progenitor2_idx]
                     probs_mating[progenitor2_idx] = mating_probability(progenitor1, progenitor2)
             
+            probs_mating = np.asarray(probs_mating)
+            probs_mating = softmax(probs_mating)
+            print('After softmax:', probs_mating)
             # Redistribute probability mass form progenitor1.
             probs_mating += (probs_mating[progenitor1_idx] / (len(probs_mating) - 1))
             probs_mating[progenitor1_idx] = 0
 
              # Choose mate for progenitor1.
-            print(probs_mating)
-            progenitor2_idx = np.random.choice(range(len(num_progenitors_gen)), p=probs_mating) 
+            print('After mass redistribution:', probs_mating)
+            print(sum(probs_mating))
+            progenitor2_idx = np.random.choice(range(num_progenitors_gen), p=probs_mating) 
             progenitor2 =  population[gen-1][progenitor2_idx]
     
             # non-recursive simulation
-            new_subject = create_subject(progenitor1, progenitor2, gen, neo4j_driver, breakpoint_probability)
+            new_subject = create_new_subject(progenitor1, progenitor2, gen, neo4j_driver, breakpoint_probability=None) ###!!!
             current_gen_subjects.append(new_subject)
 
         population[gen] = current_gen_subjects

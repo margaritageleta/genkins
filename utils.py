@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import scipy.interpolate
 
 def sift_vcf_thru_genetic_map(genetic_map, vcf_data):

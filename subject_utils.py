@@ -1,5 +1,7 @@
 import numpy as np
 import hashlib
+from py2neo import Graph, Node, Relationship, NodeMatcher
+from neo4j import GraphDatabase
 
 class DNASubject():
     
@@ -27,13 +29,20 @@ class DNASubject():
 
         # assert all sequences have same length
 
-        if self.name is None:
-            maternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
-            paternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
-            all_str = (maternal_str + paternal_str).encode('utf-8')
+        if name is None:
+            if len(self.maternal) > 0: 
+                maternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+                paternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+                all_str = (maternal_str + paternal_str).encode('utf-8')
+            else:
+                all_str = (str(int(np.random.rand()*1e6))).encode('utf-8')
+            self.name = hashlib.md5(all_str).hexdigest()
+        else: 
+            all_str = str(int(np.random.rand()*1e6))
+            all_str = (str(name) + all_str).encode('utf-8')
             self.name = hashlib.md5(all_str).hexdigest()
         
-        self.sex = sex if sex is not None else np.random.randint(2, size=1)
+        self.sex = int(sex) if sex is not None else int(np.random.rand()>=0.5)
 
         self.birthloc = birthloc if birthloc is not None else (0,0) # default coordinate
         
@@ -111,12 +120,35 @@ def create_new_subject(subject1, subject2, gen, neo4j_driver, breakpoint_probabi
     chm_length_morgans = subject1.chm_length_morgans
     chm_length_snps = subject1.chm_length_snps
 
-    new_subject = DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal, birthloc)
+    new_subject = DNASubject(
+        chm=chm, 
+        chm_length_morgans=chm_length_morgans, 
+        chm_length_snps=chm_length_snps, 
+        maternal=maternal, 
+        paternal=paternal, 
+        birthloc=birthloc,
+        name=gen,
+    )
     
-    node = Node('DNASubject', name=new_subject.name, gen=gen, sex=new_subject.sex)
+    # Add child to graph.
+    node = Node(f'DNASubject_Gen{gen}', name=new_subject.name, gen=gen, sex=new_subject.sex, progenitor1=subject1.name, progenitor2=subject2.name)
     neo4j_driver.create(node)
+    
+    # Connect child to progenitors.
+    nodes = NodeMatcher(neo4j_driver)
+    progenitor1 = nodes.match(f'DNASubject_Gen{gen-1}', name=subject1.name).first()
+    progenitor2 = nodes.match(f'DNASubject_Gen{gen-1}', name=subject2.name).first()
+    neo4j_driver.create(Relationship(progenitor1, 'PARENT', node))
+    neo4j_driver.create(Relationship(progenitor2, 'PARENT', node))
 
     return new_subject
+
+def softmax(x, temperature=1.0):
+    """Compute softmax values for each element of input array with temperature."""
+    max_x = np.max(x)
+    exp_x = np.exp((x - max_x) / temperature)
+    sum_exp_x = np.sum(exp_x)
+    return exp_x / sum_exp_x
 
 def distance(p1, p2):
     R = 6371.0 # Radius of the Earth in km
@@ -128,10 +160,9 @@ def distance(p1, p2):
     dlat = lat2 - lat1
     
     a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
-    c = 2 * atan2(np.sqrt(a), np.sqrt(1 - a))
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     
-    distance = R * c
-    return distance
+    return R * c
 
 def gaussian_probability(distance, mean, std):
     exponent = -((distance - mean) ** 2) / (2 * std ** 2)
@@ -141,6 +172,6 @@ def gaussian_probability(distance, mean, std):
 def mating_probability(subject1, subject2):
     mean_distance = 100  # Mean distance for the Gaussian distribution (adjust as needed)
     std_dev = 1000  # Standard deviation for the Gaussian distribution (adjust as needed)
-    distance = distance_between_points(subject1.birthloc, subject2.birthloc)
-    probability = gaussian_probability(distance, mean_distance, std_dev)
-    return np.asarray(probability)
+    d = distance(subject1.birthloc, subject2.birthloc)
+    probability = gaussian_probability(d, mean_distance, std_dev)
+    return probability
