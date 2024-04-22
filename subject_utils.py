@@ -3,7 +3,7 @@ import hashlib
 
 class DNASubject():
     
-    def __init__(self, chm, chm_length_morgans, chm_length_snps, maternal, paternal, name=None, sex=None):
+    def __init__(self, chm, chm_length_morgans, chm_length_snps, maternal, paternal, name=None, sex=None, birthloc=None):
           
         """
         Inputs:
@@ -34,6 +34,8 @@ class DNASubject():
             self.name = hashlib.md5(all_str).hexdigest()
         
         self.sex = sex if sex is not None else np.random.randint(2, size=1)
+
+        self.birthloc = birthloc if birthloc is not None else (0,0) # default coordinate
         
     def admix(self, breakpoint_probability=None):
 
@@ -94,10 +96,14 @@ class DNASubject():
     def __repr__(self):
         return self.name
 
-def create_new_subject(subject1, subject2, breakpoint_probability=None):
+def create_new_subject(subject1, subject2, neo4j_driver, breakpoint_probability=None):
 
     maternal = subject1.admix(breakpoint_probability)
     paternal = subject2.admix(breakpoint_probability)
+
+    ## Choose birthplace randomly (paternal or maternal) right now.
+    choice = np.random.rand()>=0.5
+    birthloc = subject1.birthloc if choice else subject2.birthloc
     
     assert subject1.chm == subject2.chm, "Wrong chromosomes being passed!!!"
     
@@ -105,4 +111,31 @@ def create_new_subject(subject1, subject2, breakpoint_probability=None):
     chm_length_morgans = subject1.chm_length_morgans
     chm_length_snps = subject1.chm_length_snps
 
-    return DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal)
+    return DNASubject(chm, chm_length_morgans, chm_length_snps, maternal, paternal, birthloc)
+
+def distance(p1, p2):
+    R = 6371.0 # Radius of the Earth in km
+    
+    lat1, lon1 = np.radians(p1[0]), np.radians(p1[1])
+    lat2, lon2 = np.radians(p2[0]), np.radians(p2[1])
+    
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    
+    a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+    c = 2 * atan2(np.sqrt(a), np.sqrt(1 - a))
+    
+    distance = R * c
+    return distance
+
+def gaussian_probability(distance, mean, std):
+    exponent = -((distance - mean) ** 2) / (2 * std ** 2)
+    probability = (1 / (std * np.sqrt(2 * np.pi))) * np.exp(exponent)
+    return probability
+
+def mating_probability(subject1, subject2):
+    mean_distance = 100  # Mean distance for the Gaussian distribution (adjust as needed)
+    std_dev = 1000  # Standard deviation for the Gaussian distribution (adjust as needed)
+    distance = distance_between_points(subject1.birthloc, subject2.birthloc)
+    probability = gaussian_probability(distance, mean_distance, std_dev)
+    return np.asarray(probability)

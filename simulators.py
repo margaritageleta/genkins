@@ -3,7 +3,7 @@ import numpy as np
 from py2neo import Graph, Node, Relationship, NodeMatcher
 from neo4j import GraphDatabase
  
-from subject_utils import DNASubject, create_new_subject
+from subject_utils import DNASubject, create_new_subject, mating_probability
 
 def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver):
     
@@ -71,10 +71,36 @@ def build_trees(
         print("Simulating generation ", gen)
         current_gen_subjects = []
 
+        num_progenitors_gen = len(range(population[gen-1]))
+
         for i in range(num_samples_per_gen):
-            # use the new admixture tool for non-recursive simulation
-            adm = create_subject(founders, gen, breakpoint_probability)
-            current_gen_subjects.append(adm)
+            # Select parents.
+
+            progenitor1_idx = random.choice(num_progenitors_gen)
+            progenitor1 = population[gen-1][progenitor1_idx]
+
+            probs_mating = np.zeros(num_progenitors_gen)
+
+            for progenitor2_idx in range(num_progenitors_gen):
+                if prorgenitor1_idx != progenitor2_idx: 
+
+                    # Compute mating probability between progenitor1 and progenitor2.
+                    # As of now, it is based on distance. 
+                    progenitor2 = population[gen-1][progenitor2_idx]
+                    probs_mating[progenitor2_idx] = mating_probability(progenitor1, progenitor2)
+            
+            # Redistribute probability mass form progenitor1.
+            probs_mating += (probs_mating[progenitor1_idx] / (len(probs_mating) - 1))
+            probs_mating[progenitor1_idx] = 0
+
+             # Choose mate for progenitor1.
+            print(probs_mating)
+            progenitor2_idx = np.random.choice(range(len(num_progenitors_gen)), p=probs_mating) 
+            progenitor2 =  population[gen-1][progenitor2_idx]
+    
+            # non-recursive simulation
+            new_subject = create_subject(progenitor1, progenitor2, gen, breakpoint_probability)
+            current_gen_subjects.append(new_subject)
 
         population[gen] = current_gen_subjects
 
