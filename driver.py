@@ -10,7 +10,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
 
+from py2neo import Graph, Node, Relationship, NodeMatcher
+from neo4j import GraphDatabase
+from simulators import build_trees
 
+# Connect to neo4j database.
+graph = Graph(os.environ.get('NEO4J_URI'), auth=(os.environ.get('NEO4J_USER'),os.environ.get('NEO4J_PASS')))
+
+# Load all genetic files needed for simulation.
 genetic_map_path = os.path.join(os.environ.get('DATA_PATH'), 'allchrs.b37.gmap')
 reference_panel_path = os.path.join(os.environ.get('DATA_PATH'), 'reference_panel_metadata.tsv')
 chr22_vcf_path = os.path.join(os.environ.get('DATA_PATH'), 'ref_final_beagle_phased_1kg_hgdp_sgdp_chr22_hg19.vcf.gz')
@@ -18,12 +25,19 @@ chr22_vcf_path = os.path.join(os.environ.get('DATA_PATH'), 'ref_final_beagle_pha
 chr22_vcf_data = allel.read_vcf(chr22_vcf_path)
 chm22_genetic_map = sift_vcf_thru_genetic_map(genetic_map=genetic_map_path, vcf_data=chr22_vcf_data)
 
-founders = simulate(
+# Check that we are starting from scratch.
+nodes = NodeMatcher(graph)
+if len(nodes) > 0: 
+    print('Graph DB is not empty!!!')
+    exit(1)
+
+# Start building trees.
+build_trees(
     vcf_data=chr22_vcf_data, 
     sample_map=sample_map, 
     genetic_map=chm22_genetic_map, 
-    out_root=None,#os.environ.get('OUT_PATH'),
-    num_gens=max_gen,
-    num_samples_per_gen=num_samples_per_gen, 
-    seed=2024
+    num_gens=7,
+    num_samples_per_gen=3,
+    neo4j_driver=graph,
+    out_dir=os.environ.get('OUT_PATH')
 )

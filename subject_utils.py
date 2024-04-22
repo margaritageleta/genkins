@@ -1,8 +1,9 @@
 import numpy as np
+import hashlib
 
 class DNASubject():
     
-    def __init__(self, chm, chm_length_morgans, chm_length_snps, maternal, paternal, name=None):
+    def __init__(self, chm, chm_length_morgans, chm_length_snps, maternal, paternal, name=None, sex=None):
           
         """
         Inputs:
@@ -11,8 +12,7 @@ class DNASubject():
         chm_length_snps: chromosome length in avalaible snps based on reference file.
         
         maternal, paternal are dictionaries with the keys: snps, anc, etc... 
-        """
-        self.name = name if name is not None else "admixed"+str(int(np.random.rand()*1e6))
+        """ 
         
         # chm related information
         self.chm = chm
@@ -23,9 +23,17 @@ class DNASubject():
         
         self.order = sorted(maternal.keys())
         self.maternal = maternal
-        self.paternal = paternal    
+        self.paternal = paternal  
 
         # assert all sequences have same length
+
+        if self.name is None:
+            maternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+            paternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+            all_str = (maternal_str + paternal_str).encode('utf-8')
+            self.name = hashlib.md5(all_str).hexdigest()
+        
+        self.sex = sex if sex is not None else np.random.randint(2, size=1)
         
     def admix(self, breakpoint_probability=None):
 
@@ -82,6 +90,9 @@ class DNASubject():
                     haploid_returns[key][begin:end] = cross[key][begin:end].copy()
     
         return haploid_returns
+
+    def __repr__(self):
+        return self.name
 
 def create_new_subject(subject1, subject2, breakpoint_probability=None):
 
