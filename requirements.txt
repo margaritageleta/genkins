@@ -1,0 +1,9 @@
+numpy
+scikit-allel
+matplotlib
+pandas
+shapely
+geopandas
+adjustText
+neo4j
+scipy
