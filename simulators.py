@@ -37,76 +37,65 @@ def get_subject_by_name(name, population):
     return subject
 
 # Check if subjects can mate based on cousin marriage restrictions:
-def check_cousin_restriction(subject, restriction, mate, neo4j_driver):
+# mate_candidates is a set containing all current candidates.
+def prune_cousins(subject, gen, mate_candidates, neo4j_driver):
     nodes = NodeMatcher(neo4j_driver)
 
-    siblings_query = f'''
-    MATCH (parent1)-[:PARENT]->(subject{{name:"{subject.name}", gen:{subject.gen}}}), (parent2)-[:PARENT]->(sibling{{gen:{mate.gen}}})
-    WHERE parent1.name = parent2.name 
+    siblings_query = '''
+    MATCH (parent1)-[:PARENT]->(subject{{name:"{subject_name}", gen:{generation}}}), (parent2)-[:PARENT]->(sibling{{gen:{generation} }})
+    WHERE subject.name <> sibling.name
+    AND (subject.progenitor1 = sibling.progenitor1
+    OR subject.progenitor1 = sibling.progenitor2
+    OR subject.progenitor2 = sibling.progenitor1
+    OR subject.progenitor2 = sibling.progenitor2)
     RETURN DISTINCT sibling
     '''
     first_cousins_query = f'''
-    MATCH (grandparent)-[:PARENT]->(parent1)-[:PARENT]->(subject{{name:"{subject.name}", gen:{subject.gen}}}), (grandparent)-[:PARENT]->(parent2)-[:PARENT]->(cousin{{gen:{mate.gen}}})
-    WHERE parent1 <> parent2 
-    AND subject.progenitor1 <> cousin.progenitor1
-    AND subject.progenitor1 <> cousin.progenitor2
-    AND subject.progenitor2 <> cousin.progenitor1
-    AND subject.progenitor2 <> cousin.progenitor2
-    RETURN DISTINCT cousin
+    
     '''
+    
+    siblings = [x for x in neo4j_driver.run(siblings_query.format(subject_name=subject.name, generation=gen))]
+    siblings = set([sibling['sibling']['name'] for sibling in siblings])
+    print(siblings)
 
-    if restriction == 'any_first_cousins_permitted':
-        siblings = graph.run(siblings_query).all()
-        for sibling in siblings:
-            if sibling.name == mate.name:
-                return False # subject and mate are siblings.
-        return True # subject and mate are +1st cousins.
+    if subject.cousin_marriages == 'any_first_cousins_permitted':
+        mate_candidates = mate_candidates.difference(siblings)
+        return mate_candidates
 
-    elif restriction == 'any_second_cousins_permitted':
-        siblings = graph.run(siblings_query).all()
-        for sibling in siblings:
-            if sibling.name == mate.name:
-                return False # subject and mate are siblings.
-        first_cousins = graph.run(first_cousins_query).all()
-        for cousin in first_cousins:
-            if cousin.name == mate.name:
-                return False # subject and mate are 1st cousins.
-        return True # subject and mate are +2nd cousins.
-        
-    elif restriction == 'any_third_cousins_permitted':
-        siblings = graph.run(siblings_query).all()
-        for sibling in siblings:
-            if sibling.name == mate.name:
-                return False # subject and mate are siblings.
-        first_cousins = graph.run(first_cousins_query).all()
-        for cousin in first_cousins:
-            if cousin.name == mate.name:
-                return False # subject and mate are 1st cousins.
-        second_cousins = graph.run(second_cousins_query).all()
-        for cousin in second_cousins:
-            if cousin.name == mate.name:
-                return False # subject and mate are 2nd cousins.
+    elif subject.cousin_marriages == 'any_second_cousins_permitted':
+        mate_candidates = mate_candidates.difference(siblings)
+        mate_candidates = mate_candidates.difference(first_cousins)
+        return mate_candidates
+    
+    elif subject.cousin_marriages == 'any_third_cousins_permitted':
+        mate_candidates = mate_candidates.difference(siblings)
+        mate_candidates = mate_candidates.difference(first_cousins)
+        mate_candidates = mate_candidates.difference(second_cousins)
+        return mate_candidates
         
         return True # subject and mate are +3rd cousins.
 
-    elif restriction == 'any_cross_cousins_permitted':
+    elif subject.cousin_marriages == 'any_cross_cousins_permitted':
         raise Exception('Not implemented yet.')
 
-    elif restriction == 'matrilateral_cross_cousins_permitted':
+    elif subject.cousin_marriages == 'matrilateral_cross_cousins_permitted':
         raise Exception('Not implemented yet.')
 
     else: # no restrictions...
         # Central thesis of Sigmund Freud and Claude Levi-Strauss: 
         # that exogamous marriage and the establishment of incest taboos
         # are the first acts of the morality and culture which define our species.
-        return True
+        return mate_candidates
 
 
 # If subject is in search of mate:
 def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001):
+    nodes = NodeMatcher(neo4j_driver)
     
     subject = population[subject_idx]
     num_progenitors_gen = len(range(len(population)))
+    population_nodes = nodes.match(f'DNASubject', gen=gen).all()
+    assert num_progenitors_gen == len(population_nodes), "Mismatch population and graph!!!"
     
     # probs_mating = np.zeros(num_progenitors_gen)
 
@@ -114,34 +103,38 @@ def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001
     # restrictions on cousin marriages and each candidate will
     # have a probability of mating associated based on marriage
     # organization and distance.
-    mate_candidates = []
-
-    for mate_idx in range(num_progenitors_gen):
-        if subject_idx != mate_idx: 
-            mate = population[mate_idx]
-
-            # Check cousin restrictions
-            ok = check_cousin_restriction(subject, subject.cousin_marriages, mate, neo4j_driver)
-            if ok: mate_candidates.append(mate)
-            
-            # Compute mating probability between progenitor1 and progenitor2.
-            # As of now, it is based on distance. 
-            mate = population[mate_idx]
-            probs_mating[mate_idx] = mating_probability(subject, mate)
+    
+    mate_candidates = set()
+    for mate in population_nodes:
+        if subject.name != mate['name']: 
+            if subject.sex != mate['sex']:
+                mate_candidates.add(mate['name'])
+    
+    mate_candidates = prune_cousins(subject, gen, mate_candidates, neo4j_driver)
+    
+    maux = []
+    for s in population:
+        if s.name in mate_candidates:
+            maux.append(s)
+    mate_candidates = maux
+    if len(mate_candidates) == 0: return None
+          
+    # Compute mating probability between progenitor1 and progenitor2.
+    # As of now, it is based on distance. 
+    probs_mating = np.zeros(len(mate_candidates))
+    for i, mate in enumerate(mate_candidates):
+        probs_mating[i] = mating_probability(subject, mate)
 
     probs_mating = np.asarray(probs_mating)
+    print('Pre softmax:', probs_mating)
     probs_mating = softmax(probs_mating, temperature=panmixia_factor)
     print('After softmax:', probs_mating)
-    
-    # Redistribute probability mass from subject.
-    probs_mating += (probs_mating[subject_idx] / (len(probs_mating) - 1))
-    probs_mating[subject_idx] = 0
 
      # Choose mate for subject.
     print('After mass redistribution:', probs_mating)
     print(sum(probs_mating))
-    mate_idx = np.random.choice(range(num_progenitors_gen), p=probs_mating) 
-    mate =  population[mate_idx]
+    mate_idx = np.random.choice(range(len(mate_candidates)), p=probs_mating) 
+    mate =  mate_candidates[mate_idx]
     
     return mate
     
@@ -156,10 +149,12 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, pop
 
     # building founders
     founders = []
-    sample_map = sample_map[sample_map.marriage_composition == 'limited_polygyny']
+    sample_map = sample_map[sample_map.cousin_marriages == 'any_first_cousins_permitted']
+    sample_map = sample_map[sample_map.marriage_composition == 'monogamous']
     index = sample_map.index
     #index = index[:11] #####!!!!
-    index = sample_map[sample_map.population =='AFR'].sample(n=5).index.append(sample_map[sample_map.population =='EAS'].sample(n=5).index)
+    #index = sample_map[sample_map.population =='AFR'].sample(n=5).index.append(sample_map[sample_map.population =='EAS'].sample(n=5).index)
+    index = sample_map.sample(n=10).index
     
     print(index)
     
@@ -270,10 +265,12 @@ def build_trees(
                     progenitor2 = get_subject_by_name(progenitor2_name, population[gen-1])
                 # Has no mate:
                 elif len(mates.keys()) == 0: 
-                    progenitor2 = find_mate(progenitor1_idx, gen, population[gen-1], neo4j_driver)
+                    progenitor2 = find_mate(progenitor1_idx, gen-1, population[gen-1], neo4j_driver)
                 # Monogamous but has lovers??
                 else: 
-                    raise Exception('I think someone had an affair...')
+                    #raise Exception('I think someone had an affair...')
+                    print('I think someone had an affair...')
+                    continue
 ############## CASE 2: If polygamous. #####################################################               
             elif (progenitor1.marriage_composition == 'limited_polygyny') or (progenitor1.marriage_composition == 'polygyny'):
                 if progenitor1.marriage_composition == 'limited_polygyny':
@@ -284,7 +281,7 @@ def build_trees(
                 if len(mates.keys()) > 0:
                     start_new_affair = bool(np.random.rand()>=polygyny_threshold) 
                     if start_new_affair:
-                        progenitor2 = find_mate(progenitor1_idx, gen, population[gen-1], neo4j_driver)
+                        progenitor2 = find_mate(progenitor1_idx, gen-1, population[gen-1], neo4j_driver)
                     else: # mate with current mates.
                         # weight probability of mate based on # of kids together.
                         mate_options, mate_weigths = mates.keys(), mates.values()
@@ -296,9 +293,12 @@ def build_trees(
                         progenitor2_name = mate_options[progenitor2_idx]
                         progenitor2 = get_subject_by_name(progenitor2_name, population[gen-1])
                 # Has no mate:
-                else: progenitor2 = find_mate(progenitor1_idx, gen, population[gen-1], neo4j_driver)
+                else: progenitor2 = find_mate(progenitor1_idx, gen-1, population[gen-1], neo4j_driver)
 
-############## CASES COVERED: MAKE KIDS ###################################################                         
+############## CASES COVERED: MAKE KIDS ###################################################  
+            if progenitor2 is None:
+                print(f'Subject could not find mat. Subject could not find love in life...')
+                continue
             new_subject = create_new_subject(progenitor1, progenitor2, gen, population_mapper, neo4j_driver, breakpoint_probability=None) ###!!!
             current_gen_subjects.append(new_subject)
 
