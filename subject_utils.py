@@ -5,7 +5,20 @@ from neo4j import GraphDatabase
 
 class DNASubject():
     
-    def __init__(self, chm, chm_length_morgans, chm_length_snps, maternal, paternal, name=None, sex=None, birthloc=None):
+    def __init__(
+        self, 
+        chm, 
+        chm_length_morgans, 
+        chm_length_snps, 
+        maternal, 
+        paternal, 
+        name=None, 
+        sex=None, 
+        birthloc=None,
+        marriage_organization='agamous',   ## default
+        marriage_composition='monogamous', ## default
+        cousin_marriages='any_second_cousins_permitted', ## default
+    ):
           
         """
         Inputs:
@@ -45,6 +58,9 @@ class DNASubject():
         self.sex = int(sex) if sex is not None else int(np.random.rand()>=0.5)
 
         self.birthloc = birthloc if birthloc is not None else (0,0) # default coordinate
+        self.marriage_organization = marriage_organization if marriage_organization is not None else 'agamous'
+        self.marriage_composition = marriage_composition if marriage_composition is not None else 'monogamous'
+        self.cousin_marriages = cousin_marriages if cousin_marriages is not None else 'any_second_cousins_permitted'
         
     def admix(self, breakpoint_probability=None):
 
@@ -101,7 +117,15 @@ class DNASubject():
         return haploid_returns
 
     def __repr__(self):
-        return self.name
+        return f"""
+        Subject {self.name} (chm{self.chm})
+        ------------------
+        Sex: {self.sex}
+        Birth location: {self.birthloc}
+        Marriage organization: {self.marriage_organization}
+        Marriage composition: {self.marriage_composition}
+        Cousin marriages: {self.cousin_marriages}
+        """
 
 def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver, breakpoint_probability=None):
 
@@ -111,6 +135,7 @@ def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver,
     ## Choose birthplace randomly (paternal or maternal) right now.
     choice = np.random.rand()>=0.5
     birthloc = subject1.birthloc if choice else subject2.birthloc
+    sex = bool(np.random.rand()>=0.5)
     
     assert subject1.chm == subject2.chm, "Wrong chromosomes being passed!!!"
     
@@ -125,7 +150,10 @@ def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver,
         maternal=maternal, 
         paternal=paternal, 
         birthloc=birthloc,
-        name=gen
+        name=gen,
+        marriage_organization=subject1.marriage_organization if sex else subject2.marriage_organization,
+        marriage_composition=subject1.marriage_composition if sex else subject2.marriage_composition,
+        cousin_marriages=subject1.cousin_marriages if sex else subject2.cousin_marriages,
     )
     
     # Add child to graph.
@@ -138,7 +166,10 @@ def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver,
         sex=new_subject.sex, 
         progenitor1=subject1.name, 
         progenitor2=subject2.name, 
-        **ancestry_percentages
+        **ancestry_percentages,
+        marriage_organization=new_subject.marriage_organization,
+        marriage_composition=new_subject.marriage_composition,
+        cousin_marriages=new_subject.cousin_marriages,
     )
     neo4j_driver.create(node)
     

@@ -15,6 +15,8 @@ from neo4j import GraphDatabase
 from simulators import build_trees
 from utils import sift_vcf_thru_genetic_map
 
+from simulator_config import marriage_organization, marriage_composition, cousin_marriages
+
 # Connect to neo4j database.
 # https://neo4j.com/docs/api/python-driver/current/api.html#uri-ref
 print(os.environ.get('NEO4J_URI'), (os.environ.get('NEO4J_USER'),os.environ.get('NEO4J_PASS')))
@@ -43,15 +45,20 @@ print('Loading sample map...')
 reference_panel_path = os.path.join(os.environ.get('DATA_PATH'), 'reference_panel_metadata.tsv')
 reference_sample_map = pd.read_csv(reference_panel_path, sep="\t")
 # Remove unnecessary columns.
-reference_sample_map = reference_sample_map.drop(columns=['Population code','Source','Region','Sample Alias','Country', 'Town'])
+reference_sample_map = reference_sample_map.drop(columns=['Source','Region','Sample Alias','Country', 'Town'])
 # Filter to single ancestry.
 reference_sample_map = reference_sample_map[reference_sample_map["Single_Ancestry"] == 1]
-sample_map = reference_sample_map[['Sample', 'Superpopulation code', 'Latitude', 'Longitude']]
-sample_map.columns = ['sample', 'population', 'latitude', 'longitude']
+sample_map = reference_sample_map[['Sample','Population','Superpopulation code', 'Latitude', 'Longitude']]
+sample_map.columns = ['sample', 'granular_population','population', 'latitude', 'longitude']
 sample_map['population_code'] = sample_map['population'].astype('category')
 sample_map['population_code'] = sample_map.population_code.cat.codes
 population_mapper = dict(zip(sample_map.population_code, sample_map.population))
 print('Population mapper', population_mapper)
+
+# Add simulator configs.
+sample_map['marriage_organization'] = sample_map.granular_population.apply(lambda x: marriage_organization[x])
+sample_map['marriage_composition'] = sample_map.granular_population.apply(lambda x: marriage_composition[x])
+sample_map['cousin_marriages'] = sample_map.granular_population.apply(lambda x: cousin_marriages[x])
 
 #print(sample_map.head())
 
