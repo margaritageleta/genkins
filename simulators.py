@@ -3,25 +3,25 @@ import numpy as np
 from py2neo import Graph, Node, Relationship, NodeMatcher
 from neo4j import GraphDatabase
  
-from subject_utils import DNASubject, create_new_subject, mating_probability, softmax
+from subject_utils import DNASubject, create_new_subject, mating_probability, softmax, analytical_ancestry
 
-def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir):
+
+def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, population_mapper):
     
     # Information about snps, chm, lengths from reference, genetic map.
-    """
     chm = genetic_map["chm"]
     chm_length_morgans = genetic_map["chm_length_morgans"]
     chm_length_snps = genetic_map["chm_length_snps"]
-    """
-    
-    chm = 22
-    chm_length_morgans = 250.0
-    chm_length_snps = 300000
 
     # building founders
     founders = []
     index = sample_map.index
-    index = index[:11] #####!!!!
+    #index = index[:11] #####!!!!
+    index = sample_map[sample_map.population =='EUR'].sample(n=5).index.append(sample_map[sample_map.population =='OCE'].sample(n=5).index).append(sample_map[sample_map.population =='EAS'].sample(n=5).index)
+    
+    print(index)
+    
+    print(sample_map.loc[index,:])
     for i in tqdm(index):
         
         name = sample_map.loc[i, "sample"]
@@ -35,11 +35,12 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir):
         """
         maternal["snps"] = vcf_data["calldata/GT"][:,i,0]
         paternal["snps"] = vcf_data["calldata/GT"][:,i,1]
+        """
 
         # single ancestry assumption.
-        maternal["anc"] = np.array([sample_map.loc[i,"population_code"]]*chm_length_snps)
-        paternal["anc"] = np.array([sample_map.loc[i,"population_code"]]*chm_length_snps)
-        """
+        maternal["anc"] = np.array([sample_map.loc[i,'population_code']]*chm_length_snps)
+        paternal["anc"] = np.array([sample_map.loc[i,'population_code']]*chm_length_snps)
+        
         
         # any more info like coordinates, prs can be added here.
         subject = DNASubject(
@@ -52,7 +53,17 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir):
         )
         founders.append(subject)
         
-        node = Node('DNASubject_Gen0', name=subject.name, gen=0, sex=subject.sex, progenitor1=None, progenitor2=None)
+        ancestry_percentages = analytical_ancestry(maternal["anc"],paternal["anc"],population_mapper)
+        
+        node = Node(
+            'DNASubject_Gen0', 
+            name=subject.name, 
+            gen=0, 
+            sex=subject.sex, 
+            progenitor1='root', 
+            progenitor2='root',
+            **ancestry_percentages
+        )
         neo4j_driver.create(node)
 
     return founders
@@ -65,11 +76,13 @@ def build_trees(
     num_samples_per_gen, 
     neo4j_driver,
     out_dir, 
-    seed=42
+    population_mapper,
+    panmixia_factor=0.000001,
+    seed=42,
 ):
     print("Building founders")
     # That's generation 0
-    founders = build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir)
+    founders = build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, population_mapper)
 
     print("Simulating...")
     np.random.seed(seed)
@@ -105,7 +118,7 @@ def build_trees(
                     probs_mating[progenitor2_idx] = mating_probability(progenitor1, progenitor2)
             
             probs_mating = np.asarray(probs_mating)
-            probs_mating = softmax(probs_mating)
+            probs_mating = softmax(probs_mating, temperature=panmixia_factor)
             print('After softmax:', probs_mating)
             # Redistribute probability mass form progenitor1.
             probs_mating += (probs_mating[progenitor1_idx] / (len(probs_mating) - 1))
@@ -118,7 +131,7 @@ def build_trees(
             progenitor2 =  population[gen-1][progenitor2_idx]
     
             # non-recursive simulation
-            new_subject = create_new_subject(progenitor1, progenitor2, gen, neo4j_driver, breakpoint_probability=None) ###!!!
+            new_subject = create_new_subject(progenitor1, progenitor2, gen, population_mapper, neo4j_driver, breakpoint_probability=None) ###!!!
             current_gen_subjects.append(new_subject)
 
         population[gen] = current_gen_subjects

@@ -23,24 +23,24 @@ class DNASubject():
         
         assert maternal.keys() == paternal.keys(), "Key mismatch!!!"
         
-        self.order = sorted(maternal.keys())
+        self.haploid_keys = sorted(maternal.keys())
         self.maternal = maternal
         self.paternal = paternal  
 
         # assert all sequences have same length
 
-        if name is None:
-            if len(self.maternal) > 0: 
-                maternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
-                paternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
-                all_str = (maternal_str + paternal_str).encode('utf-8')
-            else:
-                all_str = (str(int(np.random.rand()*1e6))).encode('utf-8')
-            self.name = hashlib.md5(all_str).hexdigest()
-        else: 
-            all_str = str(int(np.random.rand()*1e6))
-            all_str = (str(name) + all_str).encode('utf-8')
-            self.name = hashlib.md5(all_str).hexdigest()
+        #if name is None:
+        #    if len(self.maternal) > 0: 
+        #        maternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+        #        paternal_str = "".join(str(x) for x in self.maternal['snps'].tolist())
+        #        all_str = (maternal_str + paternal_str).encode('utf-8')
+        #    else:
+        #        all_str = (str(int(np.random.rand()*1e6))).encode('utf-8')
+        #    self.name = hashlib.md5(all_str).hexdigest()
+        #else: 
+        all_str = str(int(np.random.rand()*1e6))
+        all_str = (str(name) + all_str).encode('utf-8')
+        self.name = hashlib.md5(all_str).hexdigest() #!!!!!
         
         self.sex = int(sex) if sex is not None else int(np.random.rand()>=0.5)
 
@@ -54,20 +54,17 @@ class DNASubject():
         haploid_returns: dict with same keys as self.maternal and self.paternal
         """
         num_crossovers = int(np.random.poisson(self.chm_length_morgans))
+        print('NUM OF CROSSOVERS!', num_crossovers)
         
         # debug...
         # num_crossovers=3
         
-        #print(num_crossovers)
         haploid_returns = {}
-        for key in self.order:
-            haploid_returns[key] = np.zeros_like(self.maternal[key])
         
         # edge case of no breaking points.
         if num_crossovers == 0:
-            haploid_returns = {}
             select = self.maternal if np.random.rand()>=0.5 else self.paternal
-            for key in self.order:
+            for key in self.haploid_keys:
                 haploid_returns[key] = select[key].copy()
                 
         
@@ -80,24 +77,25 @@ class DNASubject():
         # For now, just uniform over snp length.
         
         else:
-            
-            breakpoints = np.random.choice(np.arange(1,self.chm_length_snps), 
-                                           size=num_crossovers, 
-                                           replace=False, 
-                                           p=breakpoint_probability)
+            breakpoints = np.random.choice(
+                np.arange(1,self.chm_length_snps), 
+                size=num_crossovers, 
+                replace=False, 
+                p=breakpoint_probability
+            )
             breakpoints = np.sort(breakpoints)
             breakpoints = np.concatenate(([0],breakpoints,[self.chm_length_snps]))
             
             #print(breakpoints)
             # select paternal or maternal randomly and apply crossovers.
-            choice = np.random.rand()>=0.5
+            choice = np.random.rand() >= 0.5
             select = self.maternal if choice else self.paternal
             cross = self.paternal if choice else self.maternal
-            for key in self.order:
+            for key in self.haploid_keys:
                 haploid_returns[key] = select[key].copy()
-                for i in range(1,len(breakpoints)-1,2):
+                for i in range(1, len(breakpoints) - 1, 2):
                     begin = breakpoints[i]
-                    end = breakpoints[i+1]
+                    end = breakpoints[i + 1]
                     haploid_returns[key][begin:end] = cross[key][begin:end].copy()
     
         return haploid_returns
@@ -105,7 +103,7 @@ class DNASubject():
     def __repr__(self):
         return self.name
 
-def create_new_subject(subject1, subject2, gen, neo4j_driver, breakpoint_probability=None):
+def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver, breakpoint_probability=None):
 
     maternal = subject1.admix(breakpoint_probability)
     paternal = subject2.admix(breakpoint_probability)
@@ -127,11 +125,21 @@ def create_new_subject(subject1, subject2, gen, neo4j_driver, breakpoint_probabi
         maternal=maternal, 
         paternal=paternal, 
         birthloc=birthloc,
-        name=gen,
+        name=gen
     )
     
     # Add child to graph.
-    node = Node(f'DNASubject_Gen{gen}', name=new_subject.name, gen=gen, sex=new_subject.sex, progenitor1=subject1.name, progenitor2=subject2.name)
+    ancestry_percentages = analytical_ancestry(maternal["anc"],paternal["anc"],population_mapper)
+    
+    node = Node(
+        f'DNASubject_Gen{gen}', 
+        name=new_subject.name, 
+        gen=gen, 
+        sex=new_subject.sex, 
+        progenitor1=subject1.name, 
+        progenitor2=subject2.name, 
+        **ancestry_percentages
+    )
     neo4j_driver.create(node)
     
     # Connect child to progenitors.
@@ -143,7 +151,7 @@ def create_new_subject(subject1, subject2, gen, neo4j_driver, breakpoint_probabi
 
     return new_subject
 
-def softmax(x, temperature=1.0):
+def softmax(x, temperature=0.000001):
     """Compute softmax values for each element of input array with temperature."""
     max_x = np.max(x)
     exp_x = np.exp((x - max_x) / temperature)
@@ -175,3 +183,11 @@ def mating_probability(subject1, subject2):
     d = distance(subject1.birthloc, subject2.birthloc)
     probability = gaussian_probability(d, mean_distance, std_dev)
     return probability
+
+def analytical_ancestry(maternal, paternal, population_mapper):
+    full_strand = np.concatenate([maternal, paternal])
+    full_strand_len = len(full_strand)
+    ancestry = {}
+    for i, anc in population_mapper.items():
+        ancestry[f'ancestry_{anc}'] = len(np.where(full_strand == i)[0]) / full_strand_len * 100
+    return ancestry

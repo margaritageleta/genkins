@@ -34,9 +34,9 @@ print('Loading genetic map...')
 genetic_map_path = os.path.join(os.environ.get('DATA_PATH'), 'allchrs.b37.gmap')
 chm22_genetic_map = sift_vcf_thru_genetic_map(genetic_map=genetic_map_path, vcf_data=chr22_vcf_data)
 """
+chm22_genetic_map = np.load(os.path.join(os.environ.get('DATA_PATH'), 'chm22_genetic_map.npy'), allow_pickle=True).item()
 
 chr22_vcf_data = None
-chm22_genetic_map = None
 
 ## Load sample map.
 print('Loading sample map...')
@@ -45,11 +45,15 @@ reference_sample_map = pd.read_csv(reference_panel_path, sep="\t")
 # Remove unnecessary columns.
 reference_sample_map = reference_sample_map.drop(columns=['Population code','Source','Region','Sample Alias','Country', 'Town'])
 # Filter to single ancestry.
-reference_sample_map = reference_sample_map[reference_sample_map["Single_Ancestry"] == 0]
+reference_sample_map = reference_sample_map[reference_sample_map["Single_Ancestry"] == 1]
 sample_map = reference_sample_map[['Sample', 'Superpopulation code', 'Latitude', 'Longitude']]
-sample_map.columns = ['sample', 'population_code', 'latitude', 'longitude']
+sample_map.columns = ['sample', 'population', 'latitude', 'longitude']
+sample_map['population_code'] = sample_map['population'].astype('category')
+sample_map['population_code'] = sample_map.population_code.cat.codes
+population_mapper = dict(zip(sample_map.population_code, sample_map.population))
+print('Population mapper', population_mapper)
 
-print(sample_map.head())
+#print(sample_map.head())
 
 
 # Check that we are starting from scratch.
@@ -69,8 +73,10 @@ build_trees(
     vcf_data=chr22_vcf_data, 
     sample_map=sample_map, 
     genetic_map=chm22_genetic_map, 
-    num_gens=7,
-    num_samples_per_gen=20,
+    num_gens=5,
+    num_samples_per_gen=5,
     neo4j_driver=graph,
-    out_dir=os.environ.get('OUT_PATH')
+    out_dir=os.environ.get('OUT_PATH'),
+    population_mapper=population_mapper,
+    panmixia_factor=0.000001, ## the bigger the panmixia_factor, the higher the panmixia in the population
 )
