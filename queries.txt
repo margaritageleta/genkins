@@ -1,0 +1,13 @@
+# First-cousins
+MATCH (grandparent1)-[:PARENT*2]->(subject{name:"bb8c0b4a3021a201e86b9782515503a6", gen:4}), (grandparent2)-[:PARENT*2]->(cousin{gen:4})
+WHERE grandparent1.name = grandparent2.name
+AND subject.progenitor1 <> cousin.progenitor1
+AND subject.progenitor1 <> cousin.progenitor2
+AND subject.progenitor2 <> cousin.progenitor1
+AND subject.progenitor2 <> cousin.progenitor2
+RETURN DISTINCT cousin
+
+# Siblings
+MATCH (parent1)-[:PARENT]->(subject{name:"bb8c0b4a3021a201e86b9782515503a6", gen:4}), (parent2)-[:PARENT]->(sibling{gen:4})
+WHERE parent1.name = parent2.name 
+RETURN DISTINCT sibling

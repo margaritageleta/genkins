@@ -40,23 +40,66 @@ def get_subject_by_name(name, population):
 def check_cousin_restriction(subject, restriction, mate, neo4j_driver):
     nodes = NodeMatcher(neo4j_driver)
 
+    siblings_query = f'''
+    MATCH (parent1)-[:PARENT]->(subject{{name:"{subject.name}", gen:{subject.gen}}}), (parent2)-[:PARENT]->(sibling{{gen:{mate.gen}}})
+    WHERE parent1.name = parent2.name 
+    RETURN DISTINCT sibling
+    '''
+    first_cousins_query = f'''
+    MATCH (grandparent)-[:PARENT]->(parent1)-[:PARENT]->(subject{{name:"{subject.name}", gen:{subject.gen}}}), (grandparent)-[:PARENT]->(parent2)-[:PARENT]->(cousin{{gen:{mate.gen}}})
+    WHERE parent1 <> parent2 
+    AND subject.progenitor1 <> cousin.progenitor1
+    AND subject.progenitor1 <> cousin.progenitor2
+    AND subject.progenitor2 <> cousin.progenitor1
+    AND subject.progenitor2 <> cousin.progenitor2
+    RETURN DISTINCT cousin
+    '''
+
     if restriction == 'any_first_cousins_permitted':
-        ...
+        siblings = graph.run(siblings_query).all()
+        for sibling in siblings:
+            if sibling.name == mate.name:
+                return False # subject and mate are siblings.
+        return True # subject and mate are +1st cousins.
+
     elif restriction == 'any_second_cousins_permitted':
-        ...
+        siblings = graph.run(siblings_query).all()
+        for sibling in siblings:
+            if sibling.name == mate.name:
+                return False # subject and mate are siblings.
+        first_cousins = graph.run(first_cousins_query).all()
+        for cousin in first_cousins:
+            if cousin.name == mate.name:
+                return False # subject and mate are 1st cousins.
+        return True # subject and mate are +2nd cousins.
+        
     elif restriction == 'any_third_cousins_permitted':
-        ...
+        siblings = graph.run(siblings_query).all()
+        for sibling in siblings:
+            if sibling.name == mate.name:
+                return False # subject and mate are siblings.
+        first_cousins = graph.run(first_cousins_query).all()
+        for cousin in first_cousins:
+            if cousin.name == mate.name:
+                return False # subject and mate are 1st cousins.
+        second_cousins = graph.run(second_cousins_query).all()
+        for cousin in second_cousins:
+            if cousin.name == mate.name:
+                return False # subject and mate are 2nd cousins.
+        
+        return True # subject and mate are +3rd cousins.
+
     elif restriction == 'any_cross_cousins_permitted':
-        ...
+        raise Exception('Not implemented yet.')
+
     elif restriction == 'matrilateral_cross_cousins_permitted':
-        ...
+        raise Exception('Not implemented yet.')
+
     else: # no restrictions...
         # Central thesis of Sigmund Freud and Claude Levi-Strauss: 
         # that exogamous marriage and the establishment of incest taboos
         # are the first acts of the morality and culture which define our species.
-
-        
-
+        return True
 
 
 # If subject is in search of mate:
@@ -78,7 +121,7 @@ def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001
             mate = population[mate_idx]
 
             # Check cousin restrictions
-            ok = check_cousin_restriction(subject.name, subject.cousin_marriages, mate.name, neo4j_driver)
+            ok = check_cousin_restriction(subject, subject.cousin_marriages, mate, neo4j_driver)
             if ok: mate_candidates.append(mate)
             
             # Compute mating probability between progenitor1 and progenitor2.
