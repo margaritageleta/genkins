@@ -309,7 +309,7 @@ cousin_marriages = {
     'Pathan': None,
     'Kalash': None,
     'Burusho': 'any_second_cousins_permitted',
-    'Mbuti': 'only_second_cousins',
+    'Mbuti': 'any_second_cousins_permitted', #only_second_cousins
     'Biaka': None,
     'Bougainville':None,
     'French':'any_third_cousins_permitted',
@@ -399,7 +399,7 @@ cousin_marriages = {
     'Armenian':'any_third_cousins_permitted',
     'Bulgarian':None,
     'Chechen':None,
-    'Czech':'only_second_cousins', 
+    'Czech':'any_second_cousins_permitted', #only_second_cousins
     'Estonian':None,
     'Georgian_Mingrelian':None,
     'Greek':'any_third_cousins_permitted',

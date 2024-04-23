@@ -160,7 +160,7 @@ def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver,
     ancestry_percentages = analytical_ancestry(maternal["anc"],paternal["anc"],population_mapper)
     
     node = Node(
-        f'DNASubject_Gen{gen}', 
+        f'DNASubject', 
         name=new_subject.name, 
         gen=gen, 
         sex=new_subject.sex, 
@@ -175,8 +175,8 @@ def create_new_subject(subject1, subject2, gen, population_mapper, neo4j_driver,
     
     # Connect child to progenitors.
     nodes = NodeMatcher(neo4j_driver)
-    progenitor1 = nodes.match(f'DNASubject_Gen{gen-1}', name=subject1.name).first()
-    progenitor2 = nodes.match(f'DNASubject_Gen{gen-1}', name=subject2.name).first()
+    progenitor1 = nodes.match(f'DNASubject', name=subject1.name, gen=gen-1).first()
+    progenitor2 = nodes.match(f'DNASubject', name=subject2.name, gen=gen-1).first()
     neo4j_driver.create(Relationship(progenitor1, 'PARENT', node))
     neo4j_driver.create(Relationship(progenitor2, 'PARENT', node))
 

@@ -11,8 +11,8 @@ def check_current_mates(subject, gen, neo4j_driver):
     nodes = NodeMatcher(neo4j_driver)
     
     # Check when subject is progenitor1.
-    offspring1 = nodes.match(f'DNASubject_Gen{gen + 1}', progenitor1=subject.name)
-    offspring2 = nodes.match(f'DNASubject_Gen{gen + 1}', progenitor2=subject.name)
+    offspring1 = nodes.match(f'DNASubject', progenitor1=subject.name)
+    offspring2 = nodes.match(f'DNASubject', progenitor2=subject.name)
     
     mates = {}
     for o in offspring1:
@@ -36,17 +36,51 @@ def get_subject_by_name(name, population):
             subject = population[idx]
     return subject
 
+# Check if subjects can mate based on cousin marriage restrictions:
+def check_cousin_restriction(subject, restriction, mate, neo4j_driver):
+    nodes = NodeMatcher(neo4j_driver)
+
+    if restriction == 'any_first_cousins_permitted':
+        ...
+    elif restriction == 'any_second_cousins_permitted':
+        ...
+    elif restriction == 'any_third_cousins_permitted':
+        ...
+    elif restriction == 'any_cross_cousins_permitted':
+        ...
+    elif restriction == 'matrilateral_cross_cousins_permitted':
+        ...
+    else: # no restrictions...
+        # Central thesis of Sigmund Freud and Claude Levi-Strauss: 
+        # that exogamous marriage and the establishment of incest taboos
+        # are the first acts of the morality and culture which define our species.
+
+        
+
+
+
 # If subject is in search of mate:
 def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001):
     
     subject = population[subject_idx]
     num_progenitors_gen = len(range(len(population)))
     
-    probs_mating = np.zeros(num_progenitors_gen)
+    # probs_mating = np.zeros(num_progenitors_gen)
+
+    # In this list we will add all the mate candidates based on the
+    # restrictions on cousin marriages and each candidate will
+    # have a probability of mating associated based on marriage
+    # organization and distance.
+    mate_candidates = []
 
     for mate_idx in range(num_progenitors_gen):
         if subject_idx != mate_idx: 
+            mate = population[mate_idx]
 
+            # Check cousin restrictions
+            ok = check_cousin_restriction(subject.name, subject.cousin_marriages, mate.name, neo4j_driver)
+            if ok: mate_candidates.append(mate)
+            
             # Compute mating probability between progenitor1 and progenitor2.
             # As of now, it is based on distance. 
             mate = population[mate_idx]
@@ -124,7 +158,7 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, pop
         ancestry_percentages = analytical_ancestry(maternal["anc"],paternal["anc"],population_mapper)
         
         node = Node(
-            'DNASubject_Gen0', 
+            'DNASubject', 
             name=subject.name, 
             gen=0, 
             sex=subject.sex, 
@@ -219,7 +253,7 @@ def build_trees(
                         progenitor2_name = mate_options[progenitor2_idx]
                         progenitor2 = get_subject_by_name(progenitor2_name, population[gen-1])
                 # Has no mate:
-                progenitor2 = find_mate(progenitor1_idx, gen, population[gen-1], neo4j_driver)
+                else: progenitor2 = find_mate(progenitor1_idx, gen, population[gen-1], neo4j_driver)
 
 ############## CASES COVERED: MAKE KIDS ###################################################                         
             new_subject = create_new_subject(progenitor1, progenitor2, gen, population_mapper, neo4j_driver, breakpoint_probability=None) ###!!!
