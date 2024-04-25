@@ -7,7 +7,7 @@ from subject_utils import DNASubject, create_new_subject, mating_probability, so
 
 
 # Check if subject has mates.
-def check_current_mates(subject, gen, neo4j_driver):
+def check_current_mates(subject, neo4j_driver):
     nodes = NodeMatcher(neo4j_driver)
     
     # Check when subject is progenitor1.
@@ -42,21 +42,30 @@ def prune_cousins(subject, gen, mate_candidates, neo4j_driver):
     nodes = NodeMatcher(neo4j_driver)
 
     siblings_query = '''
-    MATCH (parent1)-[:PARENT]->(subject{{name:"{subject_name}", gen:{generation}}}), (parent2)-[:PARENT]->(sibling{{gen:{generation} }})
-    WHERE subject.name <> sibling.name
-    AND (subject.progenitor1 = sibling.progenitor1
-    OR subject.progenitor1 = sibling.progenitor2
-    OR subject.progenitor2 = sibling.progenitor1
-    OR subject.progenitor2 = sibling.progenitor2)
-    RETURN DISTINCT sibling
+    MATCH (p1)-[:PARENT]->(s{{name:"{subject_name}"}}), (p2)-[:PARENT]->(c)
+    WHERE p1.name = p2.name 
+    RETURN DISTINCT c
     '''
-    first_cousins_query = f'''
+    first_cousins_query = '''
+    MATCH (gp1)-[:PARENT*2]->(s{{name:"{subject_name}"}}), (gp2)-[:PARENT*2]->(c)
+    WHERE gp1.name = gp2.name
+    RETURN DISTINCT c
+    '''
     
+    second_cousins_query = '''
+    MATCH (ggp1)-[:PARENT*3]->(s{{name:"{subject_name}"}}), (ggp2)-[:PARENT*3]->(c)
+    WHERE ggp1.name = ggp2.name
+    RETURN DISTINCT c
     '''
     
     siblings = [x for x in neo4j_driver.run(siblings_query.format(subject_name=subject.name, generation=gen))]
-    siblings = set([sibling['sibling']['name'] for sibling in siblings])
-    print(siblings)
+    siblings = set([sibling['c']['name'] for sibling in siblings])
+    print(f"Siblings of {subject.name}: {siblings}")
+    first_cousins = [x for x in neo4j_driver.run(first_cousins_query.format(subject_name=subject.name, generation=gen))]
+    first_cousins = set([cousin['c']['name'] for cousin in first_cousins])
+    
+    second_cousins = [x for x in neo4j_driver.run(second_cousins_query.format(subject_name=subject.name, generation=gen))]
+    second_cousins = set([cousin['c']['name'] for cousin in second_cousins])
 
     if subject.cousin_marriages == 'any_first_cousins_permitted':
         mate_candidates = mate_candidates.difference(siblings)
@@ -131,8 +140,6 @@ def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001
     print('After softmax:', probs_mating)
 
      # Choose mate for subject.
-    print('After mass redistribution:', probs_mating)
-    print(sum(probs_mating))
     mate_idx = np.random.choice(range(len(mate_candidates)), p=probs_mating) 
     mate =  mate_candidates[mate_idx]
     
@@ -149,12 +156,12 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, pop
 
     # building founders
     founders = []
-    sample_map = sample_map[sample_map.cousin_marriages == 'any_first_cousins_permitted']
+    sample_map = sample_map[sample_map.cousin_marriages == 'any_third_cousins_permitted']
     sample_map = sample_map[sample_map.marriage_composition == 'monogamous']
     index = sample_map.index
     #index = index[:11] #####!!!!
     #index = sample_map[sample_map.population =='AFR'].sample(n=5).index.append(sample_map[sample_map.population =='EAS'].sample(n=5).index)
-    index = sample_map.sample(n=10).index
+    index = sample_map.sample(n=20).index
     
     print(index)
     
@@ -242,10 +249,12 @@ def build_trees(
         current_gen_subjects = []
 
         num_progenitors_gen = len(range(len(population[gen-1])))
+        assert num_progenitors_gen > 0, f"Warning!!! {num_progenitors_gen} at generation {gen}"
         
-        print(range(num_samples_per_gen))
+        print(f'NUMBER OF PROGENITORS FOR GEN {gen}: {num_progenitors_gen}')
+        print(f'EXPECTED NUMBER OF OFFSPRING ON GEN {gen}: {int(num_samples_per_gen * num_progenitors_gen)}')
 
-        for i in tqdm(range(num_samples_per_gen)):
+        for i in tqdm(range(int(num_samples_per_gen * num_progenitors_gen))):
             # Select parents.
 
             ## Select progenitor1.
@@ -253,7 +262,7 @@ def build_trees(
             progenitor1 = population[gen-1][progenitor1_idx]
             
             # Check if progenitor1 has mates.
-            mates = check_current_mates(progenitor1, gen-1, neo4j_driver) ## generation of progenitor1
+            mates = check_current_mates(progenitor1, neo4j_driver) ## generation of progenitor1
             """
             mates = { name_of_mate : #_of_kids_together, ... }
             """
@@ -266,6 +275,12 @@ def build_trees(
                 # Has no mate:
                 elif len(mates.keys()) == 0: 
                     progenitor2 = find_mate(progenitor1_idx, gen-1, population[gen-1], neo4j_driver)
+                    
+                    if progenitor2 is not None:
+                        aux_mates = check_current_mates(progenitor2, neo4j_driver)
+                        if len(aux_mates.keys()) > 0:
+                            print('AAH I think someone had an affair...')
+                            continue
                 # Monogamous but has lovers??
                 else: 
                     #raise Exception('I think someone had an affair...')
@@ -297,7 +312,7 @@ def build_trees(
 
 ############## CASES COVERED: MAKE KIDS ###################################################  
             if progenitor2 is None:
-                print(f'Subject could not find mat. Subject could not find love in life...')
+                print(f'Subject could not find mate. Subject could not find love in life...')
                 continue
             new_subject = create_new_subject(progenitor1, progenitor2, gen, population_mapper, neo4j_driver, breakpoint_probability=None) ###!!!
             current_gen_subjects.append(new_subject)
