@@ -8,6 +8,6 @@ AND subject.progenitor2 <> cousin.progenitor2
 RETURN DISTINCT cousin
 
 # Siblings
-MATCH (parent1)-[:PARENT]->(subject{name:"bb8c0b4a3021a201e86b9782515503a6", gen:4}), (parent2)-[:PARENT]->(sibling{gen:4})
+MATCH (parent1)-[:PARENT]->(subject{name:"d8794b93bc20ba494516fc1b1276a192"}), (parent2)-[:PARENT]->(sibling)
 WHERE parent1.name = parent2.name 
 RETURN DISTINCT sibling
