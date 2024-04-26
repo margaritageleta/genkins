@@ -85,9 +85,15 @@ def prune_cousins(subject, gen, mate_candidates, neo4j_driver):
         return True # subject and mate are +3rd cousins.
 
     elif subject.cousin_marriages == 'any_cross_cousins_permitted':
+        mate_candidates = mate_candidates.difference(siblings)
+        return mate_candidates
+    ###
         raise Exception('Not implemented yet.')
 
     elif subject.cousin_marriages == 'matrilateral_cross_cousins_permitted':
+        mate_candidates = mate_candidates.difference(siblings)
+        return mate_candidates
+    ###
         raise Exception('Not implemented yet.')
 
     else: # no restrictions...
@@ -116,7 +122,8 @@ def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001
     mate_candidates = set()
     for mate in population_nodes:
         if subject.name != mate['name']: 
-            if subject.sex != mate['sex']:
+            # Mate only with opposite sex:
+            if subject.sex != mate['sex']: 
                 mate_candidates.add(mate['name'])
     
     mate_candidates = prune_cousins(subject, gen, mate_candidates, neo4j_driver)
@@ -136,6 +143,14 @@ def find_mate(subject_idx, gen, population, neo4j_driver, panmixia_factor=0.0001
 
     probs_mating = np.asarray(probs_mating)
     print('Pre softmax:', probs_mating)
+    if subject.marriage_organization == 'endogamous':
+        panmixia_factor = 0.000005
+    elif subject.marriage_organization == 'agamous':
+        panmixia_factor = 0.000025
+    elif subject.marriage_organization == 'exogamous':
+        panmixia_factor = 0.0005
+    else: raise Exception('Unknown marriage organization!!!')
+        
     probs_mating = softmax(probs_mating, temperature=panmixia_factor)
     print('After softmax:', probs_mating)
 
@@ -156,12 +171,14 @@ def build_founders(vcf_data, genetic_map, sample_map, neo4j_driver, out_dir, pop
 
     # building founders
     founders = []
-    sample_map = sample_map[sample_map.cousin_marriages == 'any_third_cousins_permitted']
+    #sample_map = sample_map[sample_map.cousin_marriages == 'any_third_cousins_permitted']
     sample_map = sample_map[sample_map.marriage_composition == 'monogamous']
+    #sample_map = sample_map[(sample_map.marriage_organization == 'endogamous') | (sample_map.marriage_organization == 'agamous')]
+    print(sample_map.head)
     index = sample_map.index
     #index = index[:11] #####!!!!
     #index = sample_map[sample_map.population =='AFR'].sample(n=5).index.append(sample_map[sample_map.population =='EAS'].sample(n=5).index)
-    index = sample_map.sample(n=20).index
+    index = sample_map.sample(n=25).index
     
     print(index)
     
